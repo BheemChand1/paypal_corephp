@@ -18,8 +18,8 @@ if (!isset($_SESSION['user_id'])) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script
-        src="https://www.paypal.com/sdk/js?client-id=AbePEv71gUyQB9-L2B3lXF1UwtV0cHf3zNBYzS_VStTyJ5EEU-QfFqcrDmvalqx-m7bBXbNtArXBGDmE&currency=USD"></script>
+    <?php require_once 'config.php'; ?>
+    <script src="https://www.paypal.com/sdk/js?client-id=<?php echo PAYPAL_CLIENT_ID; ?>&currency=USD"></script>
 
     <style>
         .course-card {
@@ -105,6 +105,76 @@ if (!isset($_SESSION['user_id'])) {
             }
             ?>
         </div>
+
+        <!-- User Orders Section -->
+        <div class="mt-5">
+            <h2 class="mb-4">Your Purchase History</h2>
+            <div class="row">
+                <?php
+                try {
+                    // Fetch user's orders with course details
+                    $stmt = $conn->prepare("
+                        SELECT o.*, c.name as course_name, c.image_url 
+                        FROM orders o 
+                        JOIN courses c ON o.course_id = c.id 
+                        WHERE o.user_id = :user_id 
+                        ORDER BY o.payment_time DESC
+                    ");
+                    $stmt->execute([':user_id' => $_SESSION['user_id']]);
+                    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                    if (count($orders) > 0) {
+                        foreach ($orders as $order) {
+                            echo '<div class="col-md-6 col-lg-4 mb-4">
+                                <div class="card h-100 shadow-sm">
+                                    <div class="row g-0">
+                                        <div class="col-4">
+                                            <img src="' . htmlspecialchars($order['image_url']) . '" 
+                                                class="img-fluid rounded-start h-100" 
+                                                style="object-fit: cover;"
+                                                alt="' . htmlspecialchars($order['course_name']) . '">
+                                        </div>
+                                        <div class="col-8">
+                                            <div class="card-body">
+                                                <h5 class="card-title">' . htmlspecialchars($order['course_name']) . '</h5>
+                                                <p class="card-text">
+                                                    <small class="text-muted">
+                                                        <i class="fas fa-calendar-alt"></i> ' .
+                                date('M d, Y', strtotime($order['payment_time'])) .
+                                '</small>
+                                                </p>
+                                                <p class="card-text">
+                                                    <span class="badge bg-success">$' .
+                                htmlspecialchars($order['amount']) . '</span>
+                                                </p>
+                                                <p class="card-text">
+                                                    <small class="text-muted">
+                                                        Order ID: ' . htmlspecialchars($order['order_id']) .
+                                '</small>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>';
+                        }
+                    } else {
+                        echo '<div class="col-12">
+                            <div class="alert alert-info" role="alert">
+                                <i class="fas fa-info-circle"></i> You haven\'t purchased any courses yet.
+                            </div>
+                        </div>';
+                    }
+                } catch (PDOException $e) {
+                    echo '<div class="col-12">
+                        <div class="alert alert-danger" role="alert">
+                            Error fetching orders: ' . $e->getMessage() . '
+                        </div>
+                    </div>';
+                }
+                ?>
+            </div>
+        </div>
     </div>
 
     <!-- Bootstrap JS and Popper.js -->
@@ -113,6 +183,12 @@ if (!isset($_SESSION['user_id'])) {
         document.addEventListener("DOMContentLoaded", function () {
             <?php foreach ($courses as $course): ?>
                 paypal.Buttons({
+                    style: {
+                        layout: 'vertical',
+                        color: 'blue',
+                        shape: 'rect',
+                        label: 'pay'
+                    },
                     createOrder: function (data, actions) {
                         return actions.order.create({
                             purchase_units: [{
@@ -131,7 +207,8 @@ if (!isset($_SESSION['user_id'])) {
                                 amount: '<?php echo $course["price"]; ?>',
                                 payerName: details.payer.name.given_name + ' ' + details.payer.name.surname,
                                 payerEmail: details.payer.email_address,
-                                paymentTime: details.create_time
+                                paymentTime: details.create_time,
+                                userID: '<?php echo $_SESSION["user_id"]; ?>'
                             };
 
                             // Send to backend
@@ -141,14 +218,26 @@ if (!isset($_SESSION['user_id'])) {
                                 body: JSON.stringify(orderData)
                             }).then(res => res.json())
                                 .then(res => {
-                                    console.log(res.message);
-                                    alert("Payment and order stored successfully!");
-                                    // Optionally redirect
-                                    window.location.href = "thank-you.php";
+                                    if (res.success) {
+                                        alert("Payment successful! Thank you for your purchase.");
+                                        window.location.href = "thank-you.php";
+                                    } else {
+                                        alert("Payment successful but there was an error storing the order. Please contact support.");
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error:', error);
+                                    alert("There was an error processing your payment. Please try again.");
                                 });
                         });
+                    },
+                    onError: function (err) {
+                        console.error('PayPal Error:', err);
+                        alert("There was an error with PayPal. Please try again later.");
+                    },
+                    onCancel: function () {
+                        alert("Payment was cancelled. You can try again when you're ready.");
                     }
-
                 }).render('#paypal-button-container-<?php echo $course["id"]; ?>');
             <?php endforeach; ?>
         });
